@@ -186,9 +186,9 @@ class GitHubAdapterTest extends TestCase
         };
 
         $this->adapter = new GitHubAdapter(
-            authToken: 'ghp_test123',
-            webhookSecret: 'test_webhook_secret',
             httpClient: $mockClient,
+            webhookSecret: 'test_webhook_secret',
+            authToken: 'ghp_test123',
             psrFactory: $this->factory,
         );
     }
@@ -644,9 +644,9 @@ class GitHubAdapterTest extends TestCase
         };
 
         $adapter = new GitHubAdapter(
-            authToken: 'ghp_bad',
-            webhookSecret: 'secret',
             httpClient: $mockClient,
+            webhookSecret: 'secret',
+            authToken: 'ghp_bad',
             psrFactory: $factory,
         );
 

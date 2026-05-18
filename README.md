@@ -14,17 +14,42 @@ Requires a PSR-18 HTTP client (`guzzlehttp/guzzle`, `symfony/http-client`, etc.)
 
 | Variable | Description | Example |
 |----------|-------------|---------|
-| `auth_token` | GitHub Personal Access Token | `ghp_abc123...` |
+| `auth_token` | GitHub token (PAT for PAT mode, optional for App mode) | `ghp_abc123...` |
 | `http_client` | PSR-18 HTTP client instance | `new GuzzleHttp\Client` |
 | `webhook_secret` | Webhook Secret | `my-secret...` |
+| `app_id` | GitHub App ID (App mode) | `123456` |
+| `installation_id` | Fixed installation ID (single-tenant App mode) | `654321` |
+| `private_key` | App private key PEM (base64-encoded, App mode) | `LS0tLS1CRUdJTiBSU0EgUFJJVkFURS...` |
 
+### PAT mode
 ```php
-use BootDesk\ChatSDK\GitHub\GitHubAdapter;
-
 $adapter = new GitHubAdapter(
-    authToken: env('GITHUB_AUTH_TOKEN'),
     httpClient: new \GuzzleHttp\Client,
     webhookSecret: env('GITHUB_WEBHOOK_SECRET'),
+    authToken: env('GITHUB_AUTH_TOKEN'),
+);
+```
+
+### Single-tenant App mode
+```php
+$adapter = new GitHubAdapter(
+    httpClient: new \GuzzleHttp\Client,
+    webhookSecret: env('GITHUB_WEBHOOK_SECRET'),
+    authToken: env('GITHUB_AUTH_TOKEN'), // optional fallback
+    appId: env('GITHUB_APP_ID'),
+    installationId: env('GITHUB_INSTALLATION_ID'),
+    privateKey: env('GITHUB_PRIVATE_KEY'),
+);
+```
+
+### Multi-tenant App mode
+```php
+$adapter = new GitHubAdapter(
+    httpClient: new \GuzzleHttp\Client,
+    webhookSecret: env('GITHUB_WEBHOOK_SECRET'),
+    authToken: env('GITHUB_AUTH_TOKEN'), // optional fallback
+    appId: env('GITHUB_APP_ID'),
+    privateKey: env('GITHUB_PRIVATE_KEY'),
 );
 ```
 

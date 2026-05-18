@@ -14,15 +14,22 @@ GitHub adapter for bootdesk/chat-sdk-core (issues / PR comments). Namespace: `Bo
 ## constructor
 ```php
 new GitHubAdapter(
-    string $authToken,
     ClientInterface $httpClient,
     string $webhookSecret,
+    ?string $authToken = null,
     string $apiUrl = 'https://api.github.com',
     ?string $appId = null,
     ?string $installationId = null,
     ?Psr17Factory $psrFactory = null,
+    ?FileUploadConverter $fileUploadConverter = null,
+    ?string $privateKey = null,
 );
 ```
+
+## auth modes
+- **PAT**: pass `authToken` only (default)
+- **Single-tenant App**: pass `authToken` (optional), `appId`, `privateKey`, `installationId`
+- **Multi-tenant App**: pass `authToken` (optional), `appId`, `privateKey`; installation IDs resolved from webhooks
 
 ## thread ID formats
 - PR: `github:{owner}/{repo}:{prNumber}`

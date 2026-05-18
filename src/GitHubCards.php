@@ -84,7 +84,11 @@ class GitHubCards
 
     private static function renderButton(Button $button): string
     {
-        return '[**'.self::escapeMarkdown($button->label).'**]('.($button->url ?? '#').')';
+        if ($button->actionHref !== null) {
+            return '['.self::escapeMarkdown($button->label).']('.self::escapeMarkdown($button->actionHref).')';
+        }
+
+        return self::escapeMarkdown($button->label);
     }
 
     public static function escapeMarkdown(string $text): string

@@ -8,6 +8,7 @@ use BootDesk\ChatSDK\Core\Chat;
 use BootDesk\ChatSDK\Core\Contracts\Adapter;
 use BootDesk\ChatSDK\Core\Contracts\FileUploadConverter;
 use BootDesk\ChatSDK\Core\Contracts\FormatConverter;
+use BootDesk\ChatSDK\Core\Contracts\HandlesSlashCommands;
 use BootDesk\ChatSDK\Core\Exceptions\AdapterException;
 use BootDesk\ChatSDK\Core\Exceptions\AuthenticationException;
 use BootDesk\ChatSDK\Core\FetchOptions;
@@ -23,7 +24,7 @@ use Psr\Http\Client\ClientInterface;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
 
-class GitHubAdapter implements Adapter
+class GitHubAdapter implements Adapter, HandlesSlashCommands
 {
     protected ?string $botUserId = null;
 
@@ -33,6 +34,9 @@ class GitHubAdapter implements Adapter
 
     /** @var array<string, string> owner/repo → installation ID */
     protected array $installationIds = [];
+
+    /** @var array<string, array{token: string, expiresAt: int}> installation ID → cached token */
+    protected array $installationTokenCache = [];
 
     protected FileUploadConverter $fileUploadConverter;
 
@@ -63,14 +67,15 @@ class GitHubAdapter implements Adapter
     ];
 
     public function __construct(
-        protected readonly string $authToken,
         protected readonly ClientInterface $httpClient,
         string $webhookSecret,
+        protected readonly ?string $authToken = null,
         protected readonly string $apiUrl = 'https://api.github.com',
         protected readonly ?string $appId = null,
         protected readonly ?string $installationId = null,
         protected readonly ?Psr17Factory $psrFactory = null,
         ?FileUploadConverter $fileUploadConverter = null,
+        protected readonly ?string $privateKey = null,
     ) {
         $this->formatConverter = new GitHubFormatConverter;
         $this->webhookVerifier = new GitHubWebhookVerifier($webhookSecret);
@@ -97,6 +102,64 @@ class GitHubAdapter implements Adapter
         }
 
         return null;
+    }
+
+    public function parseSlashCommand(ServerRequestInterface $request): ?array
+    {
+        $body = (string) $request->getBody();
+        $payload = json_decode($body, true);
+
+        if ($payload === null) {
+            return null;
+        }
+
+        $event = $request->getHeaderLine('x-github-event');
+
+        if (! in_array($event, ['issue_comment', 'pull_request_review_comment'], true)) {
+            return null;
+        }
+
+        $comment = $payload['comment'] ?? [];
+        $text = $comment['body'] ?? '';
+
+        if ($text === '' || $text[0] !== '/') {
+            return null;
+        }
+
+        // Store installation ID for multi-tenant auth
+        if (isset($payload['installation']['id'])) {
+            $repo = $payload['repository']['full_name'] ?? null;
+            if ($repo !== null) {
+                $this->installationIds[$repo] = (string) $payload['installation']['id'];
+            }
+        }
+
+        // Detect bot user ID from sender
+        if ($this->botUserId === null && isset($payload['sender']['id']) && isset($payload['sender']['type']) && $payload['sender']['type'] === 'Bot') {
+            $this->botUserId = (string) $payload['sender']['id'];
+        }
+
+        $parts = explode(' ', $text, 2);
+        $command = $parts[0];
+        $args = $parts[1] ?? '';
+
+        $repository = $payload['repository'] ?? [];
+        $owner = $repository['owner']['login'] ?? '';
+        $repo = $repository['name'] ?? '';
+
+        // Derive thread ID from the webhook payload so channel->post works
+        $channelId = $this->deriveChannelId($payload, $event);
+
+        return [
+            'command' => $command,
+            'text' => $args,
+            'userId' => (string) ($comment['user']['id'] ?? ''),
+            'isBot' => ($comment['user']['type'] ?? '') === 'Bot',
+            'isMe' => $this->botUserId !== null && (string) ($comment['user']['id'] ?? '') === $this->botUserId,
+            'channelId' => $channelId,
+            'triggerId' => null,
+            'raw' => $body,
+        ];
     }
 
     public function parseWebhook(ServerRequestInterface $request): Message
@@ -376,6 +439,7 @@ class GitHubAdapter implements Adapter
         return new ThreadInfo(
             id: $threadId,
             channelId: $this->channelIdFromThreadId($threadId),
+            title: $data['title'] ?? null,
             messageCount: (int) ($data['comments'] ?? 0),
         );
     }
@@ -417,6 +481,10 @@ class GitHubAdapter implements Adapter
 
     public function initialize(Chat $chat): void
     {
+        if ($this->appId !== null && $this->installationId === null) {
+            return;
+        }
+
         try {
             $me = $this->apiCall('user', [], 'GET');
             $this->botUserId = (string) ($me['id'] ?? null);
@@ -464,9 +532,14 @@ class GitHubAdapter implements Adapter
 
         foreach ($message->attachments as $att) {
             $name = $att->name ?? 'Attachment';
-            $lines[] = $att->url !== null
-                ? "[{$name}]({$att->url})"
-                : $name;
+
+            if ($att->url === null) {
+                $lines[] = $name;
+            } elseif ($att->type === 'image') {
+                $lines[] = "![{$name}]({$att->url})";
+            } else {
+                $lines[] = "[{$name}]({$att->url})";
+            }
         }
 
         if ($lines === []) {
@@ -483,11 +556,112 @@ class GitHubAdapter implements Adapter
             $installId = $this->installationIds[$key] ?? $this->installationId;
 
             if ($installId !== null) {
-                return $this->authToken; // In production, exchange for installation token
+                return $this->getInstallationToken($installId);
+            }
+
+            if ($this->privateKey !== null) {
+                throw new AuthenticationException(
+                    "No installation ID found for {$key}. The GitHub App must be installed on the repository."
+                );
             }
         }
 
         return $this->authToken;
+    }
+
+    protected function getInstallationToken(string $installationId): string
+    {
+        if (isset($this->installationTokenCache[$installationId])) {
+            $cached = $this->installationTokenCache[$installationId];
+            if ($cached['expiresAt'] > time() + 30) {
+                return $cached['token'];
+            }
+        }
+
+        $result = $this->exchangeInstallationToken($installationId);
+        $this->installationTokenCache[$installationId] = $result;
+
+        return $result['token'];
+    }
+
+    protected function exchangeInstallationToken(string $installationId): array
+    {
+        $jwt = $this->generateJWT();
+        $factory = $this->psrFactory ?? new Psr17Factory;
+
+        $request = $factory->createRequest(
+            'POST',
+            "{$this->apiUrl}/app/installations/{$installationId}/access_tokens"
+        )
+            ->withHeader('Authorization', "Bearer {$jwt}")
+            ->withHeader('Accept', 'application/vnd.github+json')
+            ->withHeader('User-Agent', 'bootdesk-github-adapter')
+            ->withBody($factory->createStream('{}'));
+
+        $response = $this->httpClient->sendRequest($request);
+        $statusCode = $response->getStatusCode();
+        $body = json_decode((string) $response->getBody(), true);
+
+        if ($statusCode !== 201 || ! isset($body['token'])) {
+            throw new AuthenticationException(
+                'Failed to exchange GitHub App installation token: '.($body['message'] ?? 'unknown error')
+            );
+        }
+
+        return [
+            'token' => $body['token'],
+            'expiresAt' => strtotime($body['expires_at'] ?? '+1 hour'),
+        ];
+    }
+
+    protected function generateJWT(): string
+    {
+        if ($this->privateKey === null || $this->appId === null) {
+            throw new AuthenticationException('privateKey and appId required for JWT generation');
+        }
+
+        $key = base64_decode($this->privateKey);
+
+        $header = $this->base64urlEncode(json_encode(['alg' => 'RS256', 'typ' => 'JWT']));
+        $payload = $this->base64urlEncode(json_encode([
+            'iat' => time(),
+            'exp' => time() + 600,
+            'iss' => $this->appId,
+        ]));
+
+        $signature = '';
+        openssl_sign("{$header}.{$payload}", $signature, $key, OPENSSL_ALGO_SHA256);
+
+        return "{$header}.{$payload}.".$this->base64urlEncode($signature);
+    }
+
+    protected function base64urlEncode(string $data): string
+    {
+        return rtrim(strtr(base64_encode($data), '+/', '-_'), '=');
+    }
+
+    protected function deriveChannelId(array $payload, string $event): string
+    {
+        $repository = $payload['repository'] ?? [];
+        $owner = $repository['owner']['login'] ?? '';
+        $repo = $repository['name'] ?? '';
+
+        if ($event === 'pull_request_review_comment') {
+            $prNumber = $payload['pull_request']['number'] ?? 0;
+            $commentId = $payload['comment']['id'] ?? 0;
+
+            return "github:{$owner}/{$repo}:{$prNumber}:rc:{$commentId}";
+        }
+
+        $issue = $payload['issue'] ?? [];
+        $number = $issue['number'] ?? 0;
+        $isPR = isset($issue['pull_request']);
+
+        if ($isPR) {
+            return "github:{$owner}/{$repo}:{$number}";
+        }
+
+        return "github:{$owner}/{$repo}:issue:{$number}";
     }
 
     protected function apiCall(string $endpoint, array $params, string $method = 'POST', array $queryParams = []): array
@@ -501,11 +675,16 @@ class GitHubAdapter implements Adapter
 
         // Determine auth token
         $owner = $repo = '';
-        if (preg_match('#^repos/([^/]+)/([^/]+)/#', $endpoint, $m)) {
+        if (preg_match('#^repos/([^/]+)/([^/]+)(/|$)#', $endpoint, $m)) {
             $owner = $m[1];
             $repo = $m[2];
         }
-        $token = ($owner !== '') ? $this->getAuthToken($owner, $repo) : $this->authToken;
+        $token = $this->authToken;
+        if ($owner !== '') {
+            $token = $this->getAuthToken($owner, $repo);
+        } elseif ($this->appId !== null && $this->installationId !== null) {
+            $token = $this->getInstallationToken($this->installationId);
+        }
 
         if ($method === 'GET' || $method === 'DELETE') {
             $request = $factory->createRequest($method, $url);
@@ -572,6 +751,7 @@ class GitHubAdapter implements Adapter
             author: new Author(
                 id: (string) ($comment['user']['id'] ?? ''),
                 isBot: ($comment['user']['type'] ?? '') === 'Bot',
+                isMe: $this->botUserId !== null && (string) ($comment['user']['id'] ?? '') === $this->botUserId,
             ),
             text: $comment['body'] ?? '',
             isDM: false,
@@ -603,6 +783,7 @@ class GitHubAdapter implements Adapter
             author: new Author(
                 id: (string) ($comment['user']['id'] ?? ''),
                 isBot: ($comment['user']['type'] ?? '') === 'Bot',
+                isMe: $this->botUserId !== null && (string) ($comment['user']['id'] ?? '') === $this->botUserId,
             ),
             text: $comment['body'] ?? '',
             isDM: false,
