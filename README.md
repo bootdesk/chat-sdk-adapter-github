@@ -111,6 +111,9 @@ GitHub sends webhook events to your endpoint. Verify requests using HMAC-SHA256 
 
 Supports GitHub App or PAT authentication. Handles PR comments, issue comments, and review comments. Includes emoji-to-reaction mapping for reactions like thumbs up, thumbs down, laugh, etc.
 
+## Documentationn
+Full API documentation: https://bootdesk.github.io/chat-sdk
+
 ## License
 
 MIT

@@ -26,6 +26,10 @@ new GitHubAdapter(
 );
 ```
 
+## contracts implemented
+- `HandlesSlashCommands` — `parseSlashCommand()` for comment commands starting with `/`
+- `SupportsEditMessages` / `SupportsDeleteMessages` — edit/delete via GitHub REST API
+
 ## auth modes
 - **PAT**: pass `authToken` only (default)
 - **Single-tenant App**: pass `authToken` (optional), `appId`, `privateKey`, `installationId`

@@ -9,6 +9,8 @@ use BootDesk\ChatSDK\Core\Contracts\Adapter;
 use BootDesk\ChatSDK\Core\Contracts\FileUploadConverter;
 use BootDesk\ChatSDK\Core\Contracts\FormatConverter;
 use BootDesk\ChatSDK\Core\Contracts\HandlesSlashCommands;
+use BootDesk\ChatSDK\Core\Contracts\SupportsDeleteMessages;
+use BootDesk\ChatSDK\Core\Contracts\SupportsEditMessages;
 use BootDesk\ChatSDK\Core\Exceptions\AdapterException;
 use BootDesk\ChatSDK\Core\Exceptions\AuthenticationException;
 use BootDesk\ChatSDK\Core\FetchOptions;
@@ -24,7 +26,7 @@ use Psr\Http\Client\ClientInterface;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
 
-class GitHubAdapter implements Adapter, HandlesSlashCommands
+class GitHubAdapter implements Adapter, HandlesSlashCommands, SupportsDeleteMessages, SupportsEditMessages
 {
     protected ?string $botUserId = null;
 
@@ -142,10 +144,6 @@ class GitHubAdapter implements Adapter, HandlesSlashCommands
         $parts = explode(' ', $text, 2);
         $command = $parts[0];
         $args = $parts[1] ?? '';
-
-        $repository = $payload['repository'] ?? [];
-        $owner = $repository['owner']['login'] ?? '';
-        $repo = $repository['name'] ?? '';
 
         // Derive thread ID from the webhook payload so channel->post works
         $channelId = $this->deriveChannelId($payload, $event);
@@ -750,8 +748,8 @@ class GitHubAdapter implements Adapter, HandlesSlashCommands
             threadId: $threadId,
             author: new Author(
                 id: (string) ($comment['user']['id'] ?? ''),
-                isBot: ($comment['user']['type'] ?? '') === 'Bot',
                 isMe: $this->botUserId !== null && (string) ($comment['user']['id'] ?? '') === $this->botUserId,
+                isBot: ($comment['user']['type'] ?? '') === 'Bot',
             ),
             text: $comment['body'] ?? '',
             isDM: false,
@@ -782,8 +780,8 @@ class GitHubAdapter implements Adapter, HandlesSlashCommands
             threadId: $threadId,
             author: new Author(
                 id: (string) ($comment['user']['id'] ?? ''),
-                isBot: ($comment['user']['type'] ?? '') === 'Bot',
                 isMe: $this->botUserId !== null && (string) ($comment['user']['id'] ?? '') === $this->botUserId,
+                isBot: ($comment['user']['type'] ?? '') === 'Bot',
             ),
             text: $comment['body'] ?? '',
             isDM: false,
