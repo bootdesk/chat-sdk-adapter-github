@@ -9,6 +9,7 @@ use BootDesk\ChatSDK\Core\Contracts\Adapter;
 use BootDesk\ChatSDK\Core\Contracts\FileUploadConverter;
 use BootDesk\ChatSDK\Core\Contracts\FormatConverter;
 use BootDesk\ChatSDK\Core\Contracts\HandlesSlashCommands;
+use BootDesk\ChatSDK\Core\Contracts\HasAuthorInfo;
 use BootDesk\ChatSDK\Core\Contracts\SupportsDeleteMessages;
 use BootDesk\ChatSDK\Core\Contracts\SupportsEditMessages;
 use BootDesk\ChatSDK\Core\Exceptions\AdapterException;
@@ -26,7 +27,7 @@ use Psr\Http\Client\ClientInterface;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
 
-class GitHubAdapter implements Adapter, HandlesSlashCommands, SupportsDeleteMessages, SupportsEditMessages
+class GitHubAdapter implements Adapter, HandlesSlashCommands, HasAuthorInfo, SupportsDeleteMessages, SupportsEditMessages
 {
     protected ?string $botUserId = null;
 
@@ -149,6 +150,11 @@ class GitHubAdapter implements Adapter, HandlesSlashCommands, SupportsDeleteMess
         $channelId = $this->deriveChannelId($payload, $event);
 
         return [
+            'author' => new Author(
+                id: (string) ($comment['user']['id'] ?? ''),
+                name: $comment['user']['login'] ?? null,
+                isBot: ($comment['user']['type'] ?? '') === 'Bot',
+            ),
             'command' => $command,
             'text' => $args,
             'userId' => (string) ($comment['user']['id'] ?? ''),
@@ -467,6 +473,31 @@ class GitHubAdapter implements Adapter, HandlesSlashCommands, SupportsDeleteMess
         );
     }
 
+    public function getAuthorInfo(Author $author): Author
+    {
+        try {
+            $data = $this->apiCall("user/{$author->id}", [], 'GET');
+        } catch (AdapterException) {
+            return $author;
+        }
+
+        $name = $author->name ?? ($data['login'] ?? null);
+        $profilePicture = $data['avatar_url'] ?? null;
+
+        if ($name === $author->name && $profilePicture === null) {
+            return $author;
+        }
+
+        return new Author(
+            id: $author->id,
+            name: $name,
+            email: $author->email,
+            isMe: $author->isMe,
+            isBot: $author->isBot,
+            profilePicture: $profilePicture ?? $author->profilePicture,
+        );
+    }
+
     public function openDM(string $userId): ?string
     {
         return null;
@@ -748,6 +779,7 @@ class GitHubAdapter implements Adapter, HandlesSlashCommands, SupportsDeleteMess
             threadId: $threadId,
             author: new Author(
                 id: (string) ($comment['user']['id'] ?? ''),
+                name: $comment['user']['login'] ?? null,
                 isMe: $this->botUserId !== null && (string) ($comment['user']['id'] ?? '') === $this->botUserId,
                 isBot: ($comment['user']['type'] ?? '') === 'Bot',
             ),
@@ -780,6 +812,7 @@ class GitHubAdapter implements Adapter, HandlesSlashCommands, SupportsDeleteMess
             threadId: $threadId,
             author: new Author(
                 id: (string) ($comment['user']['id'] ?? ''),
+                name: $comment['user']['login'] ?? null,
                 isMe: $this->botUserId !== null && (string) ($comment['user']['id'] ?? '') === $this->botUserId,
                 isBot: ($comment['user']['type'] ?? '') === 'Bot',
             ),
