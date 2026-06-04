@@ -98,22 +98,13 @@ class GitHubCards
 
     private static function renderTableToMarkdown(Table $table): string
     {
-        $rows = [];
-        $rows[] = '| '.implode(' | ', array_map([self::class, 'escapeMarkdown'], $table->headers)).' |';
-        $separators = [];
-        foreach (array_keys($table->headers) as $i) {
-            $align = $table->align[$i] ?? null;
-            $separators[] = match ($align?->value) {
-                'center' => ':---:',
-                'right' => '---:',
-                default => '---',
-            };
-        }
-        $rows[] = '| '.implode(' | ', $separators).' |';
-        foreach ($table->rows as $row) {
-            $rows[] = '| '.implode(' | ', array_map([self::class, 'escapeMarkdown'], $row)).' |';
-        }
+        $escapedHeaders = array_map([self::class, 'escapeMarkdown'], $table->headers);
+        $escapedRows = array_map(
+            fn (array $row): array => array_map([self::class, 'escapeMarkdown'], $row),
+            $table->rows,
+        );
+        $escaped = new Table($escapedHeaders, $escapedRows, $table->align);
 
-        return implode("\n", $rows);
+        return Table::renderAsText($escaped);
     }
 }
