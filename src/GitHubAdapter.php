@@ -19,6 +19,7 @@ use BootDesk\ChatSDK\Core\FetchResult;
 use BootDesk\ChatSDK\Core\Message;
 use BootDesk\ChatSDK\Core\PostableMessage;
 use BootDesk\ChatSDK\Core\SentMessage;
+use BootDesk\ChatSDK\Core\Support\EmojiResolver;
 use BootDesk\ChatSDK\Core\Support\NullFileUploadConverter;
 use BootDesk\ChatSDK\Core\ThreadInfo;
 use BootDesk\ChatSDK\Core\UserInfo;
@@ -43,31 +44,7 @@ class GitHubAdapter implements Adapter, HandlesSlashCommands, HasAuthorInfo, Sup
 
     protected FileUploadConverter $fileUploadConverter;
 
-    protected const EMOJI_MAP = [
-        '👍' => '+1',
-        '+1' => '+1',
-        'thumbs_up' => '+1',
-        '👎' => '-1',
-        '-1' => '-1',
-        'thumbs_down' => '-1',
-        '😄' => 'laugh',
-        'laugh' => 'laugh',
-        'smile' => 'laugh',
-        '😕' => 'confused',
-        'confused' => 'confused',
-        'thinking' => 'confused',
-        '❤️' => 'heart',
-        'heart' => 'heart',
-        'love_eyes' => 'heart',
-        '🎉' => 'hooray',
-        'hooray' => 'hooray',
-        'party' => 'hooray',
-        'confetti' => 'hooray',
-        '🚀' => 'rocket',
-        'rocket' => 'rocket',
-        '👀' => 'eyes',
-        'eyes' => 'eyes',
-    ];
+    protected EmojiResolver $emojiResolver;
 
     public function __construct(
         protected readonly ClientInterface $httpClient,
@@ -79,10 +56,12 @@ class GitHubAdapter implements Adapter, HandlesSlashCommands, HasAuthorInfo, Sup
         protected readonly ?Psr17Factory $psrFactory = null,
         ?FileUploadConverter $fileUploadConverter = null,
         protected readonly ?string $privateKey = null,
+        ?EmojiResolver $emojiResolver = null,
     ) {
         $this->formatConverter = new GitHubFormatConverter;
         $this->webhookVerifier = new GitHubWebhookVerifier($webhookSecret);
         $this->fileUploadConverter = $fileUploadConverter ?? new NullFileUploadConverter;
+        $this->emojiResolver = $emojiResolver ?? EmojiResolver::default();
     }
 
     public function getName(): string
@@ -352,7 +331,7 @@ class GitHubAdapter implements Adapter, HandlesSlashCommands, HasAuthorInfo, Sup
     public function addReaction(string $threadId, string $messageId, string $emoji): void
     {
         $decoded = $this->decodeThreadId($threadId);
-        $content = self::EMOJI_MAP[$emoji] ?? $emoji;
+        $content = $this->emojiResolver->toGithub($emoji);
 
         $this->apiCall(
             "repos/{$decoded['owner']}/{$decoded['repo']}/issues/comments/{$messageId}/reactions",
@@ -363,7 +342,7 @@ class GitHubAdapter implements Adapter, HandlesSlashCommands, HasAuthorInfo, Sup
     public function removeReaction(string $threadId, string $messageId, string $emoji): void
     {
         $decoded = $this->decodeThreadId($threadId);
-        $content = self::EMOJI_MAP[$emoji] ?? $emoji;
+        $content = $this->emojiResolver->toGithub($emoji);
 
         // GitHub requires the reaction ID, not the content, for deletion.
         // Fetch reactions to find the one matching this content.
