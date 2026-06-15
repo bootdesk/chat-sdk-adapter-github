@@ -14,6 +14,7 @@ use BootDesk\ChatSDK\Core\Contracts\SupportsDeleteMessages;
 use BootDesk\ChatSDK\Core\Contracts\SupportsEditMessages;
 use BootDesk\ChatSDK\Core\Exceptions\AdapterException;
 use BootDesk\ChatSDK\Core\Exceptions\AuthenticationException;
+use BootDesk\ChatSDK\Core\Exceptions\UnsupportedOperationException;
 use BootDesk\ChatSDK\Core\FetchOptions;
 use BootDesk\ChatSDK\Core\FetchResult;
 use BootDesk\ChatSDK\Core\Message;
@@ -181,7 +182,7 @@ class GitHubAdapter implements Adapter, HandlesSlashCommands, HasAuthorInfo, Sup
             return $this->parseReviewComment($payload, $body);
         }
 
-        throw new AdapterException("Unsupported GitHub event: {$event}");
+        throw new UnsupportedOperationException("Unsupported GitHub event: {$event}");
     }
 
     public function encodeThreadId(mixed $platformData): string

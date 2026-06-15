@@ -7,6 +7,7 @@ use BootDesk\ChatSDK\Core\Cards\Card;
 use BootDesk\ChatSDK\Core\Chat;
 use BootDesk\ChatSDK\Core\Exceptions\AdapterException;
 use BootDesk\ChatSDK\Core\Exceptions\AuthenticationException;
+use BootDesk\ChatSDK\Core\Exceptions\UnsupportedOperationException;
 use BootDesk\ChatSDK\Core\PostableMessage;
 use BootDesk\ChatSDK\GitHub\GitHubAdapter;
 use Nyholm\Psr7\Factory\Psr17Factory;
@@ -409,7 +410,7 @@ class GitHubAdapterTest extends TestCase
             ->withHeader('x-github-event', 'push')
             ->withBody($this->factory->createStream($body));
 
-        $this->expectException(AdapterException::class);
+        $this->expectException(UnsupportedOperationException::class);
         $this->adapter->parseWebhook($request);
     }
 
