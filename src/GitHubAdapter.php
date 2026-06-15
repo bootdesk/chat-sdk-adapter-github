@@ -6,12 +6,11 @@ use BootDesk\ChatSDK\Core\Author;
 use BootDesk\ChatSDK\Core\ChannelInfo;
 use BootDesk\ChatSDK\Core\Chat;
 use BootDesk\ChatSDK\Core\Contracts\Adapter;
+use BootDesk\ChatSDK\Core\Contracts\CompositeInterfaces\SupportsMessageMutability;
 use BootDesk\ChatSDK\Core\Contracts\FileUploadConverter;
 use BootDesk\ChatSDK\Core\Contracts\FormatConverter;
 use BootDesk\ChatSDK\Core\Contracts\HandlesSlashCommands;
 use BootDesk\ChatSDK\Core\Contracts\HasAuthorInfo;
-use BootDesk\ChatSDK\Core\Contracts\SupportsDeleteMessages;
-use BootDesk\ChatSDK\Core\Contracts\SupportsEditMessages;
 use BootDesk\ChatSDK\Core\Exceptions\AdapterException;
 use BootDesk\ChatSDK\Core\Exceptions\AuthenticationException;
 use BootDesk\ChatSDK\Core\Exceptions\UnsupportedOperationException;
@@ -29,7 +28,7 @@ use Psr\Http\Client\ClientInterface;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
 
-class GitHubAdapter implements Adapter, HandlesSlashCommands, HasAuthorInfo, SupportsDeleteMessages, SupportsEditMessages
+class GitHubAdapter implements Adapter, HandlesSlashCommands, HasAuthorInfo, SupportsMessageMutability
 {
     protected ?string $botUserId = null;
 
@@ -426,6 +425,27 @@ class GitHubAdapter implements Adapter, HandlesSlashCommands, HasAuthorInfo, Sup
             title: $data['title'] ?? null,
             messageCount: (int) ($data['comments'] ?? 0),
         );
+    }
+
+    public function editThread(string $threadId, ThreadInfo $threadInfo): ThreadInfo
+    {
+        $decoded = $this->decodeThreadId($threadId);
+
+        if ($threadInfo->title === null) {
+            return $this->fetchThread($threadId);
+        }
+
+        if ($decoded['type'] === 'issue') {
+            $this->apiCall("repos/{$decoded['owner']}/{$decoded['repo']}/issues/{$decoded['number']}", [
+                'title' => $threadInfo->title,
+            ], 'PATCH');
+        } else {
+            $this->apiCall("repos/{$decoded['owner']}/{$decoded['repo']}/pulls/{$decoded['number']}", [
+                'title' => $threadInfo->title,
+            ], 'PATCH');
+        }
+
+        return $this->fetchThread($threadId);
     }
 
     public function fetchChannelInfo(string $channelId): ?ChannelInfo
