@@ -27,6 +27,8 @@ use Nyholm\Psr7\Factory\Psr17Factory;
 use Psr\Http\Client\ClientInterface;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
+use Psr\Log\LoggerInterface;
+use Psr\Log\NullLogger;
 
 class GitHubAdapter implements Adapter, HandlesSlashCommands, HasAuthorInfo, SupportsMessageMutability
 {
@@ -46,6 +48,8 @@ class GitHubAdapter implements Adapter, HandlesSlashCommands, HasAuthorInfo, Sup
 
     protected EmojiResolver $emojiResolver;
 
+    protected readonly ?LoggerInterface $logger;
+
     public function __construct(
         protected readonly ClientInterface $httpClient,
         string $webhookSecret,
@@ -57,7 +61,9 @@ class GitHubAdapter implements Adapter, HandlesSlashCommands, HasAuthorInfo, Sup
         ?FileUploadConverter $fileUploadConverter = null,
         protected readonly ?string $privateKey = null,
         ?EmojiResolver $emojiResolver = null,
+        ?LoggerInterface $logger = null,
     ) {
+        $this->logger = $logger ?? new NullLogger;
         $this->formatConverter = new GitHubFormatConverter;
         $this->webhookVerifier = new GitHubWebhookVerifier($webhookSecret);
         $this->fileUploadConverter = $fileUploadConverter ?? new NullFileUploadConverter;
@@ -151,6 +157,7 @@ class GitHubAdapter implements Adapter, HandlesSlashCommands, HasAuthorInfo, Sup
         $payload = json_decode($body, true);
 
         if ($payload === null) {
+            $this->logger->error('Invalid GitHub webhook payload received');
             throw new AdapterException('Invalid GitHub webhook payload');
         }
 
@@ -174,10 +181,14 @@ class GitHubAdapter implements Adapter, HandlesSlashCommands, HasAuthorInfo, Sup
         }
 
         if ($event === 'issue_comment') {
+            $this->logger->info('GitHub webhook received', ['event' => 'issue_comment', 'repo' => ($payload['repository']['full_name'] ?? ''), 'number' => ($payload['issue']['number'] ?? '')]);
+
             return $this->parseIssueComment($payload, $body);
         }
 
         if ($event === 'pull_request_review_comment') {
+            $this->logger->info('GitHub webhook received', ['event' => 'pull_request_review_comment', 'repo' => ($payload['repository']['full_name'] ?? ''), 'prNumber' => ($payload['pull_request']['number'] ?? '')]);
+
             return $this->parseReviewComment($payload, $body);
         }
 
@@ -260,6 +271,7 @@ class GitHubAdapter implements Adapter, HandlesSlashCommands, HasAuthorInfo, Sup
         }
 
         $decoded = $this->decodeThreadId($threadId);
+        $this->logger->info('Posting GitHub comment', ['threadId' => $threadId, 'type' => ($decoded['type'] ?? '')]);
         $body = $this->renderBody($message);
         $body = $this->appendAttachments($body, $message);
 
@@ -697,6 +709,7 @@ class GitHubAdapter implements Adapter, HandlesSlashCommands, HasAuthorInfo, Sup
     {
         $factory = $this->psrFactory ?? new Psr17Factory;
         $url = "{$this->apiUrl}/{$endpoint}";
+        $this->logger->debug('GitHub API call', ['method' => $method, 'url' => $url]);
 
         if ($queryParams !== []) {
             $url .= '?'.http_build_query($queryParams);
@@ -746,6 +759,8 @@ class GitHubAdapter implements Adapter, HandlesSlashCommands, HasAuthorInfo, Sup
 
         if (isset($data['message']) && ! isset($data['id']) && ! isset($data[0])) {
             $errorMsg = $data['message'];
+
+            $this->logger->error('GitHub API error', ['endpoint' => $endpoint, 'statusCode' => $statusCode, 'message' => $errorMsg]);
 
             if (in_array($statusCode, [401, 403], true)) {
                 throw new AuthenticationException("GitHub API authentication error ({$endpoint}): {$errorMsg}");
