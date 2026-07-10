@@ -181,13 +181,13 @@ class GitHubAdapter implements Adapter, HandlesSlashCommands, HasAuthorInfo, Sup
         }
 
         if ($event === 'issue_comment') {
-            $this->logger->info('GitHub webhook received', ['event' => 'issue_comment', 'repo' => ($payload['repository']['full_name'] ?? ''), 'number' => ($payload['issue']['number'] ?? '')]);
+            $this->logger->info('GitHub webhook received', ['event' => 'issue_comment', 'repo' => ($payload['repository']['full_name'] ?? ''), 'number' => ($payload['issue']['number'] ?? ''), 'body' => mb_substr($body, 0, 500)]);
 
             return $this->parseIssueComment($payload, $body);
         }
 
         if ($event === 'pull_request_review_comment') {
-            $this->logger->info('GitHub webhook received', ['event' => 'pull_request_review_comment', 'repo' => ($payload['repository']['full_name'] ?? ''), 'prNumber' => ($payload['pull_request']['number'] ?? '')]);
+            $this->logger->info('GitHub webhook received', ['event' => 'pull_request_review_comment', 'repo' => ($payload['repository']['full_name'] ?? ''), 'prNumber' => ($payload['pull_request']['number'] ?? ''), 'body' => mb_substr($body, 0, 500)]);
 
             return $this->parseReviewComment($payload, $body);
         }
